@@ -1,12 +1,61 @@
+/*
+ * https://github.com/HiaslTiasl/it
+ */
+ 
 var it = (function () {
 "use strict";
 
-var FILTERED      = {};
-var FILTERED_REST = {};
+var FILTERED      = {};		// Special return value for filtered items
+var FILTERED_REST = {};		// Special return value for filtered items with cancellation of the whole operation
 
+/**
+ * @callback Mapper
+ * Maps a given combination of value, key, and collection to some other value.
+ * @param {?} value The value.
+ * @param {number|string} The key.
+ * @param {Array|Object} The collection.
+ * @return {?} A new value.
+ */
+ 
+/**
+ * @callback Filter
+ * Specifies a filter condition for a given combination of value, key, and collection.
+ * @param {?} value The value.
+ * @param {number|string} The key.
+ * @param {Array|Object} The collection.
+ * @return {boolean} true if the given combination passes the filter and should be further considered,
+ *         false otherwise.
+ */
+ 
+/**
+ * @callback Reducer
+ * Specifies how to reduce items to a result. In each iteration, the reducer gets the result from the previous iteration,
+ * as well as the current value and key and the collection object, and returns an intermediate result to be considered
+ * in the next iteration. The last iteration returns the final result.
+ * @param {?} res The previous result.
+ * @param {?} value The current value.
+ * @param {number|string} key The current key.
+ * @param {Array|Object} coll The collection.
+ * @return {?} The intermediate result for intermediate iterations, or the final result for the last iteration.
+ */
+
+/**
+ * Applies the given mapper and reducer function to the given collection and returns the result.
+ * @param {Array|Object} coll A collection, either an array or an object.
+ * @param {Mapper} [mapper] gets passed items from the collection and transforms them in other items, or filters them out.
+ *        Defaults to the identity function
+ * @param {Reducer} [reducer] gets passed the previous reducer result and the previous mapper result and returns a new result.
+ *        If ommitted, the result will be a collection of the same type as coll (array or object), containing the
+ *        key-value-pairs returnd from mapper.
+ * @param [res] Starting point for reducer, i.e. the first argument that gets passed to it in the first iteration.
+ *        If reducer is omitted, res indicates whether the return value is needed (e.g. map) or not (e.g. forEach).
+ * @return The result of mapping the given collection to a new collection according to the given mapper and reducing
+ *         that collection according to the given reducer.
+ */
 function mapReduce(coll, mapper, reducer, res) {
 	var m = unwrap(mapper),
 		r = unwrap(reducer),
+		hasReducer = reducer !== undefined,
 		isArr = Array.isArray(coll),
 		arr = isArr ? coll : Object.keys(coll),
 		len = arr.length,
@@ -14,27 +63,21 @@ function mapReduce(coll, mapper, reducer, res) {
 		resI = 0,
 		skip = r && arguments.length < 4,
 		resVal;
-	if (m && !r)
+	if (!hasReducer)
 		res = res ? isArr ? [] : {} : undefined;
 	for (; !isFilteredRest(resVal) && i < len; i++) {
 		var key = isArr ? i : arr[i];
 		var resKey = isArr ? resI : key;
-		resVal = coll[key];
-		if (m)
-			resVal = m(resVal, resKey, coll);
+		resVal = applyMap(m, coll[key], resKey, coll);
 		if (!isFiltered(resVal)) {
-			if (r) {
-				if (!skip)
-					resVal = r(res, resVal, resKey, coll);
-				else if (r.innerMapper)
-					resVal = r.innerMapper(resVal, key, coll);
-			}
+			if (hasReducer && !skip)
+				resVal = applyReduce(r, res, resVal, resKey, coll);
 			if (!isFiltered(resVal)) {
 				if (isArr)
 					resI++;
 				if (skip)
 					skip = false;
-				if (r)
+				if (hasReducer)
 					res = resVal;
 				else if (res)
 					res[resKey] = resVal;
@@ -44,153 +87,321 @@ function mapReduce(coll, mapper, reducer, res) {
 	return res;
 }
 
+/**
+ * Calls f for each item in collection coll.
+ * @param {Array|Object} coll A collection.
+ */
 function forEach(coll, f) {
-	mapReduce(coll, f, null, false);
+	mapReduce(coll, f, undefined, false);
 }
 
-function map(coll, f) {
-	return mapReduce(coll, f, null, true);
+/**
+ * Calls mapper for each item in coll, and returns a new collection of the same type as coll
+ * that contains all the values returnd by mapper.
+ * @param {Array|Object} coll The collection.
+ * @param {Mapper} [mapper] The mapper. Defaults to identity.
+ * @return {Array|Object} A new collection of the same type as the input collection. It will containin
+ *         all the non-filtered values returned by the mapper at the corresponding keys.
+ */
+function map(coll, mapper) {
+	return mapReduce(coll, mapper, undefined, true);
 }
 
-function reduce(coll, f, res) {
+/**
+ * Reduces the given collection coll to a value using the given reducer, starting either with
+ * res or with the first item if res is ommitted.
+ * @param {Array|Object} coll The collection.
+ * @param {Reducer} reducer The reducer.
+ * @return {?} The final result of reducing the given collection with reducer.
+ */
+function reduce(coll, reducer, res) {
 	return arguments.length < 3
-		? mapReduce(coll, null, f)
-		: mapReduce(coll, null, f, res);
+		? mapReduce(coll, undefined, reducer)
+		: mapReduce(coll, undefined, reducer, res);
 }
 
-function sum(coll, f) {
-	return mapReduce(coll, f, add);
+/**
+ * Returns the sum of all values produced by applying the given mapper to the given collection.
+ * @param {Array|Object} coll The collection.
+ * @param {Mapper} [mapper] The mapper. Defaults to identity.
+ * @return {number} The sum of all non-filtered results of applying the mapper to each collection item.
+ */
+function sum(coll, mapper) {
+	return mapReduce(coll, mapper, add);
 }
 
-function uniq(coll, f) {
-	var known = {};
-	function filterKnown(v, k, o) {
-		if (f)
-			v = f(v, k, o);
-		if (known[v])
-			v = FILTERED;
-		else
-			known[v] = true;
-		return v;
-	}
-	return mapReduce(coll, filterKnown, null, true);
+/**
+ * Returns the size of the collection that would result from mapping the given mapper
+ * to the given collection.
+ * @param {Array|Object} coll The collection.
+ * @param {Mapper} [mapper] The mapper. Defaults to identity.
+ * @return {number} The number of all non-filtered collection items.
+ */
+function count(coll, mapper) {
+	return mapper !== undefined ? mapReduce(coll, mapper, increment, 0)
+		: Array.isArray(coll) ? coll.length : Object.keys(coll).length;
 }
 
-function reducer(map, f, dontKeepMapper) {
-	function r(acc, v, k, o) {
-		var res = acc;
-		if (!isFiltered(res)) {
-			var next = map(v, k, o);
-			if (!isFiltered(next))
-				res = f(acc, next, k, o);
-		}
-		return res;
-	}
-	if (!dontKeepMapper)
-		r.innerMapper = map;
-	return r;
-}
-
+/** Adds a and b. */
 function add(a, b) {
 	return a + b;
 }
 
-function mapper() {
-	var args = arguments,
-		len = arguments.length;
-	return function (v, k, o) {
-		var res = v;
-		for (var i = 0; !isFiltered(res) && i < len; i++) {
-			var f = args[i];
-			if (typeof f === "function")
-				res = f(res, k, o);
-		}
-		return res;
-	};
+/** Increments a by one. */
+function increment(a) {
+	return a + 1;
 }
 
+/**
+ * Applies map to given value, key, and collection, thus returns map(v, k, o).
+ * If map is undefined, it defaults to the identity and v is returned.
+ * Otherwise, if map is not a function, it is considered a constant function and map itself is returned.
+ */
+function applyMap(map, v, k, o) {
+	var type = typeof map;
+	return type === "function" ? map(v, k, o)
+		: type === "undefined" ? v
+		: map;
+}
+
+/**
+ * Applies reduce to given intermediate result, value, key, and collection, thus returns reduce(res, v, k, o).
+ * If reduce is undefined, it defaults to the identity and res is returned.
+ * Otherwise, if reduce is not a function, it is considered a constant function and reduce itself is returned.
+ */
+function applyReduce(reduce, res, v, k, o) {
+	var type = typeof reduce;
+	return type === "function" ? reduce(res, v, k, o)
+		: type === "undefined" ? v
+		: reduce;
+}
+
+/**
+ * Creates a mapper by creating a logical pipe through all the given mappers in their corresponding order.
+ * A call of it.pipe(f1, f2, f3)(v, k, o) is equivalent to f3(f2(f1(v, k, o), k, o), k, o). However, a
+ * filtering mapper aborts the pipe for the current input if the filter criterion is not met. 
+ * @param {...Mapper} mappers The mappers to be connected in a pipe.
+ * @return {Mapper} A new mapper that passes the given input to all mappers in their corresponding order.
+ */
+function pipe() {
+	var args = arguments,
+		len = arguments.length;
+	return len === 0 ? undefined
+		: len == 1 ? arguments[0]
+		: function (v, k, o) {
+			var res = v;
+			for (var i = 0; !isFiltered(res) && i < len; i++)
+				res = applyMap(args[i], res, k, o);
+			return res;
+		};
+}
+
+/** Indicates whether val is a placeholder for a filtered out value. */
 function isFiltered(val) {
 	return isFilteredVal(val) || isFilteredRest(val);
 }
 
+/** Indicates whether val is a placeholder for a single filtered out value. */
 function isFilteredVal(val) {
 	return val === FILTERED;
 }
 
+/** Indicates whether val is a placeholder for filtering out all the remaining collection items. */
 function isFilteredRest(val) {
 	return val === FILTERED_REST;
 }
 
-function filterImpl(map, f, filtersRest) {
+/** Returns a mapper function corresponding to the given filter function f. */
+function filterImpl(f, filtersRest) {
 	var filteredVal = filtersRest ? FILTERED_REST : FILTERED;
 	return function (v, k, o) {
-		var res = map(v, k, o);
-		return ((filtersRest && !isFilteredRest(res))
-			|| !isFiltered(res))
-			&& !f(res, k, o) ? filteredVal : res;
+		return ((filtersRest && !isFilteredRest(v))
+			|| !isFiltered(v))
+			&& !applyMap(f, v, k, o) ? filteredVal : v;
 	};
 }
 
-function filter(map, f) {
-	return filterImpl(map, f, false);
+/**
+ * Returns a mapper function corresponding to the given filter function f. If, for a given input, f returns false, 
+ * the resulting mapper returns a special value indicating that the filter condition is not met. Otherwise, it
+ * returns the input value.
+ * @param {Filter} f The filter function.
+ * @return {Mapper} A mapper corresponding to the filter function, which returns the input value if the filter
+ *         condition is met, and a special value otherwise.
+ */
+function filter(f) {
+	return filterImpl(f, false);
 }
 
-function takeWhile(map, f) {
-	return filterImpl(map, f, true);
+/**
+ * Returns a mapper function corresponding to the given filter function f. If, for a given input, f returns false,
+ * the resulting mapper returns a special value indicating that the filter condition is not met and any remaining
+ * collection items, including this one, do not pass the filter. Otherwise, it returns the input value.
+ * @param {Filter} f The filter function.
+ * @return {Mapper} A mapper corresponding to the filter function, which returns the input value if the filter
+ *         condition is met, and a special value otherwise.
+ */
+function takeWhile(f) {
+	return filterImpl(f, true);
 }
 
-function takeUntilKey(map, key) {
+/**
+ * Returns a mapper function that filters out any remaining items once it encounters the given key. Equivalent to
+ * it.takeWhile((v, k, o) => k !== key).
+ * @return {Mapper} A mapper that filters out any remaining items once it encounters the given key.
+ */
+function takeUntilKey(key) {
 	return function (v, k, o) {
-		return k === key ? FILTERED_REST : map(v, k, o);
+		return k === key ? FILTERED_REST : v;
 	};
 }
 
-function takeUntilVal(map, val) {
+/**
+ * Returns a mapper function that filters out any remaining items once it encounters the given value. Equivalent to
+ * it.takeWhile((v, k, o) => v !== val).
+ * @return {Mapper} A mapper that filters out any remaining items once it encounters the given key.
+ */
+function takeUntilVal(val) {
 	return function (v, k, o) {
-		var res = map(v, k, o);
-		return res === val ? FILTERED_REST : res;
+		return v === val ? FILTERED_REST : v;
 	};
 }
 
-function it(f) {
-	return new Wrapper(f);
+/**
+ * Returns a mapper function that filters out any that it already received previously. Note that this mapper is stateful!
+ * In particular, If the resulting mapper is applied twice to the same collection, the second time it will simply filter
+ * out all items, since it still knows them from the previous time. In order to deal with this issue, the resulting function
+ * has a method reset that, when called, discards the internal cache to restore the initial state.
+ * If a mapper is given, it will be used to compute the identity, but only the original values are returned.
+ * @param {Mapper} [mapper] A mapper to compute the identity of input values.
+ * @return {Mapper} A mapper that filters out duplicated input values.
+ */
+function uniq(mapper) {
+	var type = typeof mapper,
+		constant = type !== "function" && type !== "undefined",
+		known = constant ? false : {};
+	function filterKnown(v, k, o) {
+		var val = applyMap(mapper, v, k, o);
+		if (constant ? known : known[val])
+			v = constant ? FILTERED_REST : FILTERED;
+		else if (constant)
+			known = true;
+		else
+			known[val] = true;
+		return v;
+	}
+	filterKnown.reset = function () {
+		known = constant ? false : {};
+	};
+	return filterKnown;
 }
 
+// -------------------------------------------------------------------
+// Wrappers
+// -------------------------------------------------------------------
+
+/**
+ * Creates a new Wrapper for incrementally building a pipe callback, starting with the given mapper.
+ * All Mapper-returning functions of it can be used as chainable methods on a Wrapper and append the
+ * resulting mapper to the internal pipe. A .get method returns the corresponding Mapper.
+ * Functions of it that accept a collection are also provided as methods of Wrappers with the same
+ * argument lists. If a mapper is given to such a method, a new pipe out of the wrapped pipe and the
+ * given mapper is used without modifying the current mapper.
+ * @return {Wrapper} A new Wrapper, initially wrapping mapper.
+ */
+function it(mapper) {
+	return new Wrapper(mapper);
+}
+
+/** Returns the wrapped function if f is a Wrapper, f itself otherwise. */
+function unwrap(f) {
+	return f instanceof Wrapper ? f.get() : f;
+}
+
+/** Wraps a piped callback function. */
 function Wrapper(f) {
-	this.fun = f;
+	this._pipe = null;
+	this._wrapped = f;
 }
 
-function wrapperMethod(f) {
-	return function (a1, a2) {
-		var map = this.fun
-		this.fun = f(map, a1, a2);
+/**
+ * Creates a Wrapper pipe method for the given function f.
+ * The resulting method calls f with the wrapped function prepended to the arguments list.
+ */
+function pipeMethod(f) {
+	return function (mapper) {
+		checkNewPipe(this);
+		this._pipe.push(f(mapper));
 		return this;
 	}
 }
 
-function unwrap(f) {
-	return f instanceof Wrapper ? f.fun
-		: f;
+/**
+ * Creates a Wrapper terminal method for the given function f.
+ * The resulting method accepts a collection and calls f with that collection and the wrapped function.
+ */
+function terminalMethod(f, ignoreMapper) {
+	return function (coll, mapper, reducer, res) {
+		var m = this.get(),
+			len = arguments.length;
+		if (ignoreMapper) {
+			res = reducer;
+			reducer = mapper;
+			len--;
+		}
+		else if (mapper !== undefined)
+			m = pipe(m, mapper);
+		return len >= f.length ? f(coll, m, reducer, res) : f(coll, m, reducer);
+	}
 }
 
-Wrapper.prototype.map          = wrapperMethod(mapper);
-Wrapper.prototype.filter       = wrapperMethod(filter);
-Wrapper.prototype.reduce       = wrapperMethod(reducer);
-Wrapper.prototype.takeWhile    = wrapperMethod(takeWhile);
-Wrapper.prototype.takeUntilKey = wrapperMethod(takeUntilKey);
-Wrapper.prototype.takeUntilVal = wrapperMethod(takeUntilVal);
-Wrapper.prototype.valueOf = function () {
-	return this.fun;
+/**
+ * If the given wrapper has no pipe, the currently wrapped function is moved to a new pipe.
+ * Gets called when the pipe is extended.
+ */
+function checkNewPipe(wrapper) {
+	if (!wrapper._pipe) {
+		wrapper._pipe = [wrapper._wrapped]
+		wrapper._wrapped = null;
+	}
 }
 
+/** Extends the current pipe by the given functions in their corresponding order. */
+Wrapper.prototype.pipe = function () {
+	checkNewPipe(this);
+	this._pipe.push.apply(this._pipe, arguments);
+	return this;
+};
+
+Wrapper.prototype.filter       = pipeMethod(filter);
+Wrapper.prototype.takeWhile    = pipeMethod(takeWhile);
+Wrapper.prototype.takeUntilKey = pipeMethod(takeUntilKey);
+Wrapper.prototype.takeUntilVal = pipeMethod(takeUntilVal);
+Wrapper.prototype.uniq         = pipeMethod(uniq);
+
+Wrapper.prototype.forEach   = terminalMethod(forEach);
+Wrapper.prototype.map       = terminalMethod(map);
+Wrapper.prototype.reduce    = terminalMethod(mapReduce, true);
+Wrapper.prototype.mapReduce = terminalMethod(mapReduce);
+Wrapper.prototype.sum       = terminalMethod(sum);
+Wrapper.prototype.count     = terminalMethod(count);
+
+Wrapper.prototype.get = function () {
+	if (!this._wrapped)
+		this._wrapped = pipe.apply(it, this._pipe);
+	this._pipe = null;
+	return this._wrapped;
+};
 
 it.forEach      = forEach;
 it.map          = map;
 it.mapReduce    = mapReduce;
 it.reduce       = reduce;
-it.reducer      = reducer;
-it.mapper       = mapper;
+it.sum          = sum;
+it.count        = count;
+it.pipe         = pipe;
 it.filter       = filter;
+it.uniq         = uniq;
 it.takeWhile    = takeWhile;
 it.takeUntilKey = takeUntilKey;
 it.takeUntilVal = takeUntilVal;
