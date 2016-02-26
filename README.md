@@ -47,8 +47,7 @@ it(times2).pipe(times2, times2).reduce([1,2,3], add);  // returns 48
 If another mapper is passed to such an iterating method, a new pipe out of the wrapped pipe and the given mapper is created. The wrapped pipe is not modified in this case.
 
 ```javascript
-wrapper = it(times2)
-
+wrapper = it(times2);
 wrapper.map([1,2,3], times2);  // returns [4, 12]
 wrapper.map([1,2,3]);          // returns [2, 6]
 ```
