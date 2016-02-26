@@ -2,9 +2,16 @@
 
 Supports iterating over array items and object properties in a functional way, with a natural way to eliminate the need of storing intermediate results.
 
+## Why
+
+- Perform multiple operations on data.
+- Reuse sequences of operations for multiple data collections.
+- Keep full control over shortcut fusion and intermediate results.
+- Small and simple.
+
 ## Usage
 
-Provides higher order functions such as `map` and `reduce` that iterate a collection and perform some operation.
+You can iterate collections and perform some operations using higher order functions such as `map` and `reduce`.
 
 ```javascript
 // Running example callbacks
@@ -16,7 +23,9 @@ it.reduce({ x: 1, y: 2 }, add);             // returns 3
 it.mapReduce({ x: 1, y: 2 }, times2, add);  // returns 6
 ```
 
-For specifying sequences of multiple iterations, you can construct pipes. Piped operations can filter and transform elements, and they can be reused. We refer to filtering operations as 'filters' and to transforming operations as 'mappers'. The returned pipe is just a new callback function that, when called, executes the given callback arguments in the specified sequence. You can pass the pipe directly to functions such as map. If an item does not pass a filter in a pipe, the pipe is cancelled for that item, so any remaining operations in the pipe are not executed for this item.
+For specifying sequences of multiple iterations, you can construct pipes. Piped operations can filter and transform elements, and they can be reused. We refer to filtering operations as 'filters' and to transforming operations as 'mappers'. The `pipe` function accepts multiple mappers. If you want to place a filter in a pipe, wrap it in a call to `it.filter` (which transforms it to a mapper, see [Internals](#internals)).
+
+The returned pipe is just a new callback function that, when called, executes the given callback arguments in the specified sequence. You can pass the pipe directly to functions such as map. If an item does not pass a filter in a pipe, the pipe is cancelled for that item, so any remaining operations in the pipe are not executed for this item.
  
 ```javascript
 const odd         = x => x % 2 === 0;
@@ -51,3 +60,9 @@ wrapper = it(times2);
 wrapper.map([1,2,3], times2);  // returns [4, 12]
 wrapper.map([1,2,3]);          // returns [2, 6]
 ```
+
+## Internals
+
+### Pipes and Filters
+
+Pipes are just functions that pass input through the callbacks given as arguments. In order to avoid storing information about whether a given callback is a mapper or a filter, we only consider mappers. To place filters in a pipe, we can create a corresponding mapper using `it.filter`. The mapper returns a special object instance if an item did not pass the filter, the item itself otherwise.
