@@ -26,7 +26,7 @@ it.map([1,2,3], times2IfOdd);                    // returns [2, 6]
 it.mapReduce({ x: 1, y: 2 }, times2IfOdd, add);  // returns 2
 ```
 
-Those who don't like the static API can create a wrapper using `it()` that provides chainable methods for constructing pipes. Note that these methods do not create a new Wrapper instance, but mutate the current wrapper and return it instead. For getting the piped function, us `.get()`.
+Those who don't like the static API can create a wrapper using `it()` that provides chainable methods for constructing pipes. Note that these methods do not create a new Wrapper instance, but mutate the current wrapper and return it instead. For getting the piped function, use `.get()`.
 
 ```javascript
 it.map([1,2,3], it().filter(odd).pipe(times2).get());  // returns [2, 6]
