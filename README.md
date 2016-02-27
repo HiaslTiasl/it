@@ -16,7 +16,6 @@ It is inspired by other libraries such as [lodash](https://lodash.com/), [Ramda]
 You can iterate collections and perform some operations using higher order functions such as `map` and `reduce`.
 
 ```javascript
-// Running example callbacks
 const times2 = x => 2 * x;
 const add    = (a, b) => a + b;
 
@@ -51,14 +50,14 @@ it.map([1, 2, 3], wrapper.get());  // returns [2, 6]
 The wrapper also provides methods for the iterating functions like `map`, `reduce`, and `mapReduce`:
 
 ```javascript
-it().filter(odd).pipe(times2)).map([1, 2, 3]);           // returns [2, 6]
+it().filter(odd).pipe(times2).map([1, 2, 3]);            // returns [2, 6]
 it(times2).pipe(times2, times2).reduce([1, 2, 3], add);  // returns 48
 ```
 
 If another mapper is passed to such an iterating method, a new pipe out of the wrapped pipe and the given mapper is created. The wrapped pipe is not modified in this case.
 
 ```javascript
-wrapper = it(times2);
+wrapper = it().filter(odd).pipe(times2);
 wrapper.map([1, 2, 3], times2);  // returns [4, 12]
 wrapper.map([1, 2, 3]);          // returns [2, 6]
 ```
@@ -72,7 +71,7 @@ Pipes are just functions that pass input through the callbacks given as argument
 Since Pipes are just callback functions with the common signature `(value, key, object)`, technically you can also pass them to build-in Array functions such as `Array.prototype.map` or equivalent functions of third party libraries such as [lodash](https://lodash.com/). However, those do not know of the meaning of the special return values of filtering operations, so they might return wrong results. In case of `map` operations, you can fix this by passing the result to `it.map`:
 
 ```javascript
-let arr = [1,2,3].map(it.pipe(it.filter(odd), times2));  // returns [2, [object Object], 6]
+let arr = [1,2,3].map(it.pipe(it.filter(odd), times2));  // returns [2, <Object>, 6]
 arr = it.map(arr);                                       // returns [2, 6]
 ```
 
@@ -84,8 +83,8 @@ Once you constructed a pipe of operations, you can reuse it for multiple data co
 
 ```javascript
 const POISON_PILL = -1;
-let gotPoisonPill = false;
-const noPoisonPillYet => gotPoisonPill || (gotPoisonPill = value === POISON_PILL);
+let alive = true;
+const noPoisonPillYet = value => alive && (alive = value !== POISON_PILL);
 
 let pipe = it.pipe(it.filter(noPoisonPillYet), times2);
 it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns [6, 4, 2, 0]
