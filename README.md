@@ -80,7 +80,7 @@ In any case, it is best to avoid this kind of issues and use pipes only with `it
 
 ### Stateful Operations
 
-Once you constructed a pipe of operations, you can reuse it for multiple data collections. However, you have to be careful with stateful operations! Consider the following example:
+Once you constructed a pipe of operations, you can reuse it for multiple data collections. But be careful with stateful operations! Consider the following example:
 
 ```javascript
 const POISON_PILL = -1;
