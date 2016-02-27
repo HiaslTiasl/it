@@ -176,24 +176,74 @@ function applyReduce(reduce, res, v, k, o) {
 		: reduce;
 }
 
+function invoke(f) {
+	return f();
+}
+
 /**
  * Creates a mapper by creating a logical pipe through all the given mappers in their corresponding order.
  * A call of it.pipe(f1, f2, f3)(v, k, o) is equivalent to f3(f2(f1(v, k, o), k, o), k, o). However, a
- * filtering mapper aborts the pipe for the current input if the filter criterion is not met. 
+ * filtering mapper aborts the pipe for the current input if the filter criterion is not met. If any stateful
+ * functions with a .reset methods are given, the resulting functions is stateful itself and provides a
+ * .reset method which calls the original .reset methods, i.e. it resets the state of all stateful methods
+ * within the pipe.
  * @param {...Mapper} mappers The mappers to be connected in a pipe.
  * @return {Mapper} A new mapper that passes the given input to all mappers in their corresponding order.
  */
 function pipe() {
 	var args = arguments,
-		len = arguments.length;
-	return len === 0 ? undefined
-		: len == 1 ? arguments[0]
-		: function (v, k, o) {
-			var res = v;
-			for (var i = 0; !isFiltered(res) && i < len; i++)
-				res = applyMap(args[i], res, k, o);
-			return res;
-		};
+		len = arguments.length,
+		piped;
+	if (len > 0) {
+		if (len === 1)
+			piped = arguments[0];
+		else {
+			piped = function (v, k, o) {
+				var res = v;
+				for (var i = 0; !isFiltered(res) && i < len; i++)
+					res = applyMap(args[i], res, k, o);
+				return res;
+			};
+			var resetters = null;
+			for (var i = 0; i < len; i++) {
+				var op = args[i];
+				if (op.reset && typeof op === "function") {
+					if (!resetters)
+						resetters = [];
+					resetters.push(op.reset);
+				}
+			}
+			if (resetters) {
+				piped = stateful(piped, function () {
+					resetters.forEach(invoke);
+				});
+			}
+		}
+	}
+	return piped;
+}
+
+/**
+ * Resets the given mapper or wrapper if it is stateful.
+ * @param {Mapper|Wrapper} mapper A mapper, possibly wrapped.
+ * @return {Mapper|Wrapper} The given mapper.
+ */
+function reset(mapper) {
+	if (mapper.reset)
+		mapper.reset();
+	return mapper;
+}
+
+ /**
+  * Marks the given mapper as stateful and binds a reset method to it that restores its original state.
+  * @param {Mapper} mapper A stateful mapper.
+  * @param {Function} A function that, when called wihtout arguments, restores the mapper's original state.
+  * @return {Mapper} The given mapper extended with a reset method.
+  */
+function stateful(mapper, reset) {
+	if (typeof reset === "function")
+		mapper.reset = reset;
+	return mapper;
 }
 
 /** Indicates whether val is a placeholder for a filtered out value. */
@@ -292,7 +342,6 @@ function uniq(mapper) {
 	}
 	filterKnown.reset = function () {
 		known = constant ? false : {};
-		return filterKnown;
 	};
 	return filterKnown;
 }
@@ -308,6 +357,9 @@ function uniq(mapper) {
  * Functions of it that accept a collection are also provided as methods of Wrappers with the same
  * argument lists. If a mapper is given to such a method, a new pipe out of the wrapped pipe and the
  * given mapper is used without modifying the current mapper.
+ * By default, if such a method is called, stateful mappers are automatically reset afterwards. This
+ * behavior can be changed by calling .autoReset with false. For manually resetting state at a
+ * specific point in time use the .reset method.
  * @return {Wrapper} A new Wrapper, initially wrapping mapper.
  */
 function it(mapper) {
@@ -322,7 +374,8 @@ function unwrap(f) {
 /** Wraps a piped callback function. */
 function Wrapper(f) {
 	this._pipe = null;
-	this._wrapped = f;
+	this._wrapped = unwrap(f);
+	this._autoReset = true;
 }
 
 /**
@@ -352,7 +405,10 @@ function terminalMethod(f, ignoreMapper) {
 		}
 		else if (mapper !== undefined)
 			m = pipe(m, mapper);
-		return len >= f.length ? f(coll, m, reducer, res) : f(coll, m, reducer);
+		var res = len >= f.length ? f(coll, m, reducer, res) : f(coll, m, reducer);
+		if (this._autoReset && m.reset)
+			m.reset();
+		return res;
 	}
 }
 
@@ -371,6 +427,26 @@ function checkNewPipe(wrapper) {
 Wrapper.prototype.pipe = function () {
 	checkNewPipe(this);
 	this._pipe.push.apply(this._pipe, arguments);
+	return this;
+};
+
+/** Resets the state of all internal stateful functions, if any. */
+Wrapper.prototype.reset = function () {
+	var pipe = this.get();
+	if (pipe.reset)
+		pipe.reset();
+	return this;
+};
+
+/** Sets wether stateful mappers should be reset after processing a collection. */
+Wrapper.prototype.autoReset = function (autoReset, resetNow) {
+	this._autoReset = !!autoReset;
+	return resetNow ? this.reset() : this;
+};
+
+/** Marks the wrapper as stateful and binds a reset method to it that restores its original state. */
+Wrapper.prototype.stateful = function (reset) {
+	stateful(this.get(), reset);
 	return this;
 };
 
@@ -401,6 +477,8 @@ it.reduce       = reduce;
 it.sum          = sum;
 it.count        = count;
 it.pipe         = pipe;
+it.reset        = reset;
+it.stateful     = stateful;
 it.filter       = filter;
 it.uniq         = uniq;
 it.takeWhile    = takeWhile;
