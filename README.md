@@ -20,7 +20,7 @@ You can iterate collections and perform some operations using higher order funct
 const times2 = x => 2 * x;
 const add    = (a, b) => a + b;
 
-it.map([1,2,3], times2);                    // returns [2, 4, 6]
+it.map([1, 2, 3], times2);                  // returns [2, 4, 6]
 it.reduce({ x: 1, y: 2 }, add);             // returns 3
 it.mapReduce({ x: 1, y: 2 }, times2, add);  // returns 6
 ```
@@ -30,10 +30,10 @@ For specifying sequences of multiple iterations, you can construct pipes. Piped 
 The returned pipe is just a new callback function that, when called, executes the given callback arguments in the specified sequence. You can pass the pipe directly to functions such as map. If an item does not pass a filter in a pipe, the pipe is cancelled for that item, so any remaining operations in the pipe are not executed for this item.
  
 ```javascript
-const odd         = x => x % 2 === 0;
+const odd         = x => x % 2 !== 0;
 const times2IfOdd = it.pipe(it.filter(odd), times2);
 
-it.map([1, 2, 3], times2IfOdd);                    // returns [2, 6]
+it.map([1, 2, 3], times2IfOdd);                  // returns [2, 6]
 it.mapReduce({ x: 1, y: 2 }, times2IfOdd, add);  // returns 2
 ```
 
@@ -44,7 +44,7 @@ it.map([1, 2, 3], it().filter(odd).pipe(times2).get());  // returns [2, 6]
 
 const notMultipleOf4 = x => x % 4 !== 0;
 let wrapper = it(times2);
-wrapper.filter(notMultipleOf4);  // Mutates wrapper
+wrapper.filter(notMultipleOf4);    // Mutates wrapper
 it.map([1, 2, 3], wrapper.get());  // returns [2, 6]
 ```
 
@@ -88,8 +88,8 @@ let gotPoisonPill = false;
 const noPoisonPillYet => gotPoisonPill || (gotPoisonPill = value === POISON_PILL);
 
 let pipe = it.pipe(it.filter(noPoisonPillYet), times2);
-it.map([3, 2, 1, 0, -1, -2, -3], pipe); // returns [6, 4, 2, 0]
-it.map([3, 2, 1, 0, -1, -2, -3], pipe); // returns []
+it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns [6, 4, 2, 0]
+it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns []
 ```
 
 In the first call to `it.map`, we process items until we get `POISON_PILL`, after which all following items are discarded. However, in the second call the result is empty. This is because the filter function is stateful, and it keeps the state of the previous call.
