@@ -292,6 +292,7 @@ function uniq(mapper) {
 	}
 	filterKnown.reset = function () {
 		known = constant ? false : {};
+		return filterKnown;
 	};
 	return filterKnown;
 }
