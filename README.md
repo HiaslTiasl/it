@@ -13,6 +13,8 @@ It is inspired by other libraries such as [lodash](https://lodash.com/), [Ramda]
 
 ## Usage
 
+This is a general guide about how to use it. For a detailled API description see [the code](it.js) itself.
+
 You can iterate collections and perform some operations using higher order functions such as `map` and `reduce`.
 
 ```javascript
