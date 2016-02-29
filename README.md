@@ -4,16 +4,17 @@ Supports iterating over array items and object properties in a functional way, w
 
 ## Why
 
-It is inspired by other libraries such as [lodash](https://lodash.com/), [Ramda](http://ramdajs.com/), and the [Java 8 Stream API](https://docs.oracle.com/javase/8/docs/api/java/util/stream/package-summary.html). It provides the following features:
+*It* is inspired by other libraries such as [lodash](https://lodash.com/), [Ramda](http://ramdajs.com/), and the [Java 8 Stream API](https://docs.oracle.com/javase/8/docs/api/java/util/stream/package-summary.html). *It* provides the following features:
 - Perform multiple operations on data.
-- Build sequences of operations
+- Build sequences of operations.
 - Reuse operation sequences for multiple data collections.
+- Manage stateful operations.
 - Keep full control over shortcut fusion and intermediate results.
 - Small and simple.
 
 ## Usage
 
-This is a general guide about how to use it. For a detailled API description see [the code](it.js) itself.
+This is a general guide about how to use *it*. For a detailled API description see [the code](it.js) itself.
 
 You can iterate collections and perform some operations using higher order functions such as `map` and `reduce`.
 
@@ -28,7 +29,7 @@ it.mapReduce({ x: 1, y: 2 }, times2, add);  // returns 6
 
 For specifying sequences of multiple iterations, you can construct pipes. Piped operations can filter and transform elements, and they can be reused. We refer to filtering operations as 'filters' and to transforming operations as 'mappers'. The `pipe` function accepts multiple mappers. If you want to place a filter in a pipe, wrap it in a call to `it.filter` (which transforms it to a mapper, see [Internals](#internals)).
 
-The returned pipe is just a new callback function that, when called, executes the given callback arguments in the specified sequence. You can pass the pipe directly to functions such as map. If an item does not pass a filter in a pipe, the pipe is cancelled for that item, so any remaining operations in the pipe are not executed for this item.
+The returned pipe is just a new callback function that, when called, executes the given callback arguments in the specified sequence. You can pass the pipe directly to functions such as `map`. If an item does not pass a filter in a pipe, the pipe is cancelled for that item, so any remaining operations in the pipe are not executed for this item.
  
 ```javascript
 const odd         = x => x % 2 !== 0;
@@ -64,6 +65,43 @@ wrapper.map([1, 2, 3], times2);  // returns [4, 12]
 wrapper.map([1, 2, 3]);          // returns [2, 6]
 ```
 
+### Stateful Operations
+
+Once you've constructed a pipe of operations, you can reuse it for multiple data collections. But be careful with stateful operations! Consider the following example:
+
+```javascript
+const POISON_PILL = -1;
+let alive = true;
+function noPoisonPillYet(value) {
+  if (alive && value === POISON_PILL)
+    alive = false;
+  return alive;
+}
+
+let pipe = it.pipe(it.filter(noPoisonPillYet), times2);
+it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns [6, 4, 2, 0]
+it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns []
+```
+
+In the first call to `it.map`, we process items until we get `POISON_PILL`, after which all following items are discarded. However, in the second call the result is empty. This is because the filter function is stateful, and it keeps the state of the previous call.
+
+Note that there is a stateless function `it.takeUntilVal` equivalent to `noPoisonPillYet` in the example above, which even aborts iterating elements once the given value is encountered. However, there are cases where you need stateful functions. For using stateful mappers or reducers with *it*, you should use `it.stateful` to mark them as such, and provide callbacks for managing the state.
+
+```javascript
+alive = undefined;
+const onInit     = () => alive = true;
+const onComplete = () => alive = undefined;
+const statefulOp = it.stateful(noPoisonPillYet, onInit, onResult);
+
+pipe = it.pipe(it.filter(statefulOp), times2); // Equivalent to it.stateful(pipe, onInit, onResult),
+                                               // with pipe as defined in previous example
+
+it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns [6, 4, 2, 0]
+it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns [6, 4, 2, 0]
+```
+
+In the example above, we construct a pipe that contains a stateful operation, which results in a stateful pipe. Whenever we use stateful operations for processing data in *it*, *it* automatically first executes the provided `onInit` callback before processing the data, and executes the `onComplete` callback when completed. You can use `it.stateful` with filters (as above), filtering mappers, mappers, pipes, and reducers. For Wrappers, use their `.stateful` method.
+
 ## Internals
 
 ### Pipes and Filters
@@ -77,30 +115,4 @@ let arr = [1,2,3].map(it.pipe(it.filter(odd), times2));  // returns [2, <Object>
 arr = it.map(arr);                                       // returns [2, 6]
 ```
 
-In any case, it is best to avoid this kind of issues and use pipes only with `it` functions if possible.
-
-### Stateful Operations
-
-Once you constructed a pipe of operations, you can reuse it for multiple data collections. But be careful with stateful operations! Consider the following example:
-
-```javascript
-const POISON_PILL = -1;
-let alive = true;
-const noPoisonPillYet = value => alive && (alive = value !== POISON_PILL);
-
-let pipe = it.pipe(it.filter(noPoisonPillYet), times2);
-it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns [6, 4, 2, 0]
-it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns []
-```
-
-In the first call to `it.map`, we process items until we get `POISON_PILL`, after which all following items are discarded. However, in the second call the result is empty. This is because the filter function is stateful, and it keeps the state of the previous call.
-
-Note that there is a stateless function `it.takeUntilVal` equivalent to `noPoisonPillYet` in the example above, which even aborts iterating elements once the given value is encountered. But there certainly are cases where you need stateful functions. The function `it.uniq`, for example, returns a stateful filter function that filters out values which it already received previously. The same issues as illustrated in the example above apply. To solve them, either generate a new filter function calling `it.uniq` again, or call the `.reset` method of the returned filter function in order to reset its state.
-
-```javascript
-let u = it.uniq();
-it.map([1, 2, 3, 2, 1, 0], u);  // returns [1, 2, 3, 0]
-it.map([1, 2, 3, 2, 1, 0], u);  // returns []
-u.reset();
-it.map([1, 2, 3, 2, 1, 0], u);  // returns [1, 2, 3, 0]
-```
+In any case, it is best to avoid this kind of issues and use pipes only with *it* functions if possible.
