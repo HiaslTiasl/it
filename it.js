@@ -65,6 +65,8 @@ function mapReduce(coll, mapper, reducer, res) {
 		resVal;
 	if (!hasReducer)
 		res = res ? isArr ? [] : {} : undefined;
+	onInit(m);
+	onInit(r);
 	for (; !isFilteredRest(resVal) && i < len; i++) {
 		var key = isArr ? i : arr[i];
 		var resKey = isArr ? resI : key;
@@ -84,6 +86,8 @@ function mapReduce(coll, mapper, reducer, res) {
 			}
 		}
 	}
+	onResult(m, res);
+	onResult(r, res);
 	return res;
 }
 
@@ -152,6 +156,31 @@ function increment(a) {
 	return a + 1;
 }
 
+/** Executes the onInit method of the given function if existing. */
+function onInit(f) {
+	if (f && typeof f.onInit === "function")
+		f.onInit();
+}
+
+/** Executes the onResult method of the given function if existing. */
+function onResult(f, res) {
+	if (f && typeof f.onResult === "function")
+		f.onResult(res);
+}
+
+/** Executes the given function. */
+function invoke(f) {
+	return f();
+}
+
+/** Does nothing. */
+function noop() {}
+
+/** Returns arg. */
+function identity(arg) {
+	return arg;
+}
+
 /**
  * Applies map to given value, key, and collection, thus returns map(v, k, o).
  * If map is undefined, it defaults to the identity and v is returned.
@@ -176,10 +205,6 @@ function applyReduce(reduce, res, v, k, o) {
 		: reduce;
 }
 
-function invoke(f) {
-	return f();
-}
-
 /**
  * Creates a mapper by creating a logical pipe through all the given mappers in their corresponding order.
  * A call of it.pipe(f1, f2, f3)(v, k, o) is equivalent to f3(f2(f1(v, k, o), k, o), k, o). However, a
@@ -187,13 +212,15 @@ function invoke(f) {
  * functions with a .reset methods are given, the resulting functions is stateful itself and provides a
  * .reset method which calls the original .reset methods, i.e. it resets the state of all stateful methods
  * within the pipe.
- * @param {...Mapper} mappers The mappers to be connected in a pipe.
+ * @param {(...Mapper)|Array<Mapper>} mappers The mappers to be connected in a pipe.
  * @return {Mapper} A new mapper that passes the given input to all mappers in their corresponding order.
  */
 function pipe() {
 	var args = arguments,
-		len = arguments.length,
 		piped;
+	if (args.length === 1 && Array.isArray(args[0]))
+		args = args[0];
+	var len = args.length;
 	if (len > 0) {
 		if (len === 1)
 			piped = arguments[0];
@@ -204,47 +231,80 @@ function pipe() {
 					res = applyMap(args[i], res, k, o);
 				return res;
 			};
-			var resetters = null;
+			var statefulOps = null,
+				multiple = false;
 			for (var i = 0; i < len; i++) {
 				var op = args[i];
-				if (op.reset && typeof op === "function") {
-					if (!resetters)
-						resetters = [];
-					resetters.push(op.reset);
+				if (typeof op === "function"
+					&& (typeof op.onInit === "function" || typeof op.onResult === "function")
+				) {
+					if (!statefulOps)
+						statefulOps = op;
+					else if (multiple)
+						statefulOps.push(op);
+					else {
+						multiple = true;
+						statefulOps = [statefulOps, op];	
+					}
 				}
 			}
-			if (resetters) {
-				piped = stateful(piped, function () {
-					resetters.forEach(invoke);
-				});
+			if (statefulOps) {
+				piped = stateful(piped, !multiple ? statefulOps.onInit : function () {
+					resetters.forEach(onInit);
+				}, !multiple ? statefulOps.onResult : function (res) {
+					resetters.forEach(function (f) {
+						onResult(f, res);
+					});
+				}, !multiple);
 			}
 		}
 	}
 	return piped;
 }
 
-/**
- * Resets the given mapper or wrapper if it is stateful.
- * @param {Mapper|Wrapper} mapper A mapper, possibly wrapped.
- * @return {Mapper|Wrapper} The given mapper.
- */
-function reset(mapper) {
-	if (mapper.reset)
-		mapper.reset();
-	return mapper;
+ /**
+  * Marks the given function as stateful and attaches the given callback functions to it.
+  * @param {Function} f A stateful function (mapper or reducer).
+  * @param {Function} onInit Function that should be called before processing a collection.
+  * @param {Function} [onResult] Function that should be called after processing a collection.
+  * @param {boolean} [nowrap] True if the given function should not be wrapped for attaching the callbacks.
+  * @return {Function} The given function, possibly wrapped, and with the given callbacks attached.
+  */
+function stateful(f, onInit, onResult, nowrap) {
+	var hasOnInit = typeof onInit === "function",
+		hasOnResult = typeof onResult === "function",
+		res = nowrap || !(hasOnInit || hasOnResult) ? f
+			: function (optRes, v, k, o) {
+				return o ? f(optRes, v, k, o) : f(optRes, v, k);
+			};
+	if (hasOnInit)
+		res.onInit = onInit;
+	if (hasOnResult)
+		res.onResult = onResult;
+	return res;
 }
 
- /**
-  * Marks the given mapper as stateful and binds a reset method to it that restores its original state.
-  * @param {Mapper} mapper A stateful mapper.
-  * @param {Function} A function that, when called wihtout arguments, restores the mapper's original state.
-  * @return {Mapper} The given mapper extended with a reset method.
-  */
-function stateful(mapper, reset) {
-	if (typeof reset === "function")
-		mapper.reset = reset;
-	return mapper;
-}
+/**
+ * Returns a stateful function with onInit, onResult methods such that the given reset callback is called
+ * before processing a collection, but only if something was processed previously. Useful for lazily restoring
+ * the initial state.
+ * @param {Function} f A stateful function (mapper or reducer).
+ * @param {Function} reset Function that should be called before processing a new collection.
+ * @param {boolean} [nowrap] True if the given function should not be wrapped for attaching the callbacks.
+ * @return {Function} The given function, possibly wrapped, and with the given callbacks attached.
+ */
+function resettable(f, reset, nowrap) {
+	if (typeof reset === "function") {
+		var toBeReset = false;
+		f = stateful(f, function () {
+			if (toBeReset)
+				reset();
+		}, function () {
+			toBeReset = true;
+		}, nowrap);
+	}
+	return f;
+};
 
 /** Indicates whether val is a placeholder for a filtered out value. */
 function isFiltered(val) {
@@ -330,7 +390,7 @@ function uniq(mapper) {
 	var type = typeof mapper,
 		constant = type !== "function" && type !== "undefined",
 		known = constant ? false : {};
-	function filterKnown(v, k, o) {
+	return stateful(function filterKnown(v, k, o) {
 		var val = applyMap(mapper, v, k, o);
 		if (constant ? known : known[val])
 			v = constant ? FILTERED_REST : FILTERED;
@@ -339,11 +399,11 @@ function uniq(mapper) {
 		else
 			known[val] = true;
 		return v;
-	}
-	filterKnown.reset = function () {
+	}, function () {
 		known = constant ? false : {};
-	};
-	return filterKnown;
+	}, function () {
+		known = null;
+	}, true);
 }
 
 // -------------------------------------------------------------------
@@ -375,7 +435,6 @@ function unwrap(f) {
 function Wrapper(f) {
 	this._pipe = null;
 	this._wrapped = unwrap(f);
-	this._autoReset = true;
 }
 
 /**
@@ -406,8 +465,6 @@ function terminalMethod(f, ignoreMapper) {
 		else if (mapper !== undefined)
 			m = pipe(m, mapper);
 		var res = len >= f.length ? f(coll, m, reducer, res) : f(coll, m, reducer);
-		if (this._autoReset && m.reset)
-			m.reset();
 		return res;
 	}
 }
@@ -430,23 +487,11 @@ Wrapper.prototype.pipe = function () {
 	return this;
 };
 
-/** Resets the state of all internal stateful functions, if any. */
-Wrapper.prototype.reset = function () {
-	var pipe = this.get();
-	if (pipe.reset)
-		pipe.reset();
-	return this;
-};
-
-/** Sets wether stateful mappers should be reset after processing a collection. */
-Wrapper.prototype.autoReset = function (autoReset, resetNow) {
-	this._autoReset = !!autoReset;
-	return resetNow ? this.reset() : this;
-};
-
 /** Marks the wrapper as stateful and binds a reset method to it that restores its original state. */
-Wrapper.prototype.stateful = function (reset) {
-	stateful(this.get(), reset);
+Wrapper.prototype.stateful = function (onInit, onResult, nowrap) {
+	if (nowrap === undefined)
+		nowrap = !this._wrapped;
+	stateful(this.get(), onInit, onResult, nowrap);
 	return this;
 };
 
@@ -465,7 +510,7 @@ Wrapper.prototype.count     = terminalMethod(count);
 
 Wrapper.prototype.get = function () {
 	if (!this._wrapped)
-		this._wrapped = pipe.apply(it, this._pipe);
+		this._wrapped = pipe(this._pipe);
 	this._pipe = null;
 	return this._wrapped;
 };
@@ -477,13 +522,15 @@ it.reduce       = reduce;
 it.sum          = sum;
 it.count        = count;
 it.pipe         = pipe;
-it.reset        = reset;
 it.stateful     = stateful;
+it.resettable   = resettable;
 it.filter       = filter;
 it.uniq         = uniq;
 it.takeWhile    = takeWhile;
 it.takeUntilKey = takeUntilKey;
 it.takeUntilVal = takeUntilVal;
+it.noop         = noop;
+it.identity     = identity;
 
 return it;
 
