@@ -43,7 +43,7 @@ var FILTERED_REST = {};		// Special return value for filtered items with cancell
  * Applies the given mapper and reducer function to the given collection and returns the result.
  * @param {Array|Object} coll A collection, either an array or an object.
  * @param {Mapper} [mapper] gets passed items from the collection and transforms them in other items, or filters them out.
- *        Defaults to the identity function
+ *        Defaults to the identity function.
  * @param {Reducer} [reducer] gets passed the previous reducer result and the previous mapper result and returns a new result.
  *        If ommitted, the result will be a collection of the same type as coll (array or object), containing the
  *        key-value-pairs returnd from mapper.
@@ -215,26 +215,24 @@ function applyReduce(reduce, res, v, k, o) {
  * @param {(...Mapper)|Array<Mapper>} mappers The mappers to be connected in a pipe.
  * @return {Mapper} A new mapper that passes the given input to all mappers in their corresponding order.
  */
-function pipe() {
-	var args = arguments,
+function pipe(args) {
+	var mappers = arguments.length === 1 && Array.isArray(args) ? args : arguments,
+		len = mappers.length,
 		piped;
-	if (args.length === 1 && Array.isArray(args[0]))
-		args = args[0];
-	var len = args.length;
 	if (len > 0) {
 		if (len === 1)
-			piped = arguments[0];
+			piped = mappers[0];
 		else {
 			piped = function (v, k, o) {
 				var res = v;
 				for (var i = 0; !isFiltered(res) && i < len; i++)
-					res = applyMap(args[i], res, k, o);
+					res = applyMap(mappers[i], res, k, o);
 				return res;
 			};
 			var statefulOps = null,
 				multiple = false;
 			for (var i = 0; i < len; i++) {
-				var op = args[i];
+				var op = mappers[i];
 				if (typeof op === "function"
 					&& (typeof op.onInit === "function" || typeof op.onComplete === "function")
 				) {
@@ -487,9 +485,10 @@ function checkNewPipe(wrapper) {
 }
 
 /** Extends the current pipe by the given functions in their corresponding order. */
-Wrapper.prototype.pipe = function () {
+Wrapper.prototype.pipe = function (args) {
 	checkNewPipe(this);
-	this._pipe.push.apply(this._pipe, arguments);
+	var mappers = arguments.length === 1 && Array.isArray(args) ? args : arguments;
+	this._pipe.push.apply(this._pipe, mappers);
 	return this;
 };
 
