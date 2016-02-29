@@ -117,7 +117,7 @@ it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns []
 
 In the first call to `it.map`, we process items until we get `POISON_PILL`, after which all following items are discarded. However, in the second call the result is empty. This is because the filter function is stateful, and it keeps the state of the previous call.
 
-Note that `it.takeUntilVal` is equivalent to `noPoisonPillYet`, but stateless and more efficient. However, there are cases where you need stateful functions. For using stateful mappers or reducers with *it*, you should use `it.stateful` to mark them as such, and provide callbacks for managing the state.
+Note that we could use `it.takeWhile` or `it.takeUntilVal` to achieve the same effect, but in a stateless and more efficient way. However, there are cases where you need stateful functions. For using stateful mappers or reducers with *it*, you should use `it.stateful` to mark them as such, and provide callbacks for managing the state.
 
 ```javascript
 alive = undefined;
