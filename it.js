@@ -86,8 +86,8 @@ function mapReduce(coll, mapper, reducer, res) {
 			}
 		}
 	}
-	onResult(m, res);
-	onResult(r, res);
+	onComplete(m, res);
+	onComplete(r, res);
 	return res;
 }
 
@@ -162,10 +162,10 @@ function onInit(f) {
 		f.onInit();
 }
 
-/** Executes the onResult method of the given function if existing. */
-function onResult(f, res) {
-	if (f && typeof f.onResult === "function")
-		f.onResult(res);
+/** Executes the onComplete method of the given function if existing. */
+function onComplete(f, res) {
+	if (f && typeof f.onComplete === "function")
+		f.onComplete(res);
 }
 
 /** Executes the given function. */
@@ -236,7 +236,7 @@ function pipe() {
 			for (var i = 0; i < len; i++) {
 				var op = args[i];
 				if (typeof op === "function"
-					&& (typeof op.onInit === "function" || typeof op.onResult === "function")
+					&& (typeof op.onInit === "function" || typeof op.onComplete === "function")
 				) {
 					if (!statefulOps)
 						statefulOps = op;
@@ -249,43 +249,49 @@ function pipe() {
 				}
 			}
 			if (statefulOps) {
-				piped = stateful(piped, !multiple ? statefulOps.onInit : function () {
-					resetters.forEach(onInit);
-				}, !multiple ? statefulOps.onResult : function (res) {
-					resetters.forEach(function (f) {
-						onResult(f, res);
+				piped = !multiple ? copyStatefulCallbacks(piped, statefulOps)
+					: stateful(piped, function () {
+						resetters.forEach(onInit);
+					}, function (res) {
+						resetters.forEach(function (f) {
+							onComplete(f, res);
+						});
 					});
-				}, !multiple);
 			}
 		}
 	}
 	return piped;
 }
 
+/** Copies methods .onInit and .onComplete from src to dst. */
+function copyStatefulCallbacks(dst, src) {
+	return src ? stateful(dst, src.onInit, src.onComplete) : dst;
+}
+
  /**
   * Marks the given function as stateful and attaches the given callback functions to it.
   * @param {Function} f A stateful function (mapper or reducer).
   * @param {Function} onInit Function that should be called before processing a collection.
-  * @param {Function} [onResult] Function that should be called after processing a collection.
+  * @param {Function} [onComplete] Function that should be called after processing a collection.
   * @param {boolean} [nowrap] True if the given function should not be wrapped for attaching the callbacks.
   * @return {Function} The given function, possibly wrapped, and with the given callbacks attached.
   */
-function stateful(f, onInit, onResult, nowrap) {
+function stateful(f, onInit, onComplete, nowrap) {
 	var hasOnInit = typeof onInit === "function",
-		hasOnResult = typeof onResult === "function",
-		res = nowrap || !(hasOnInit || hasOnResult) ? f
+		hasOnComplete = typeof onComplete === "function",
+		res = nowrap || !(hasOnInit || hasOnComplete) ? f
 			: function (optRes, v, k, o) {
 				return o ? f(optRes, v, k, o) : f(optRes, v, k);
 			};
 	if (hasOnInit)
 		res.onInit = onInit;
-	if (hasOnResult)
-		res.onResult = onResult;
+	if (hasOnComplete)
+		res.onComplete = onComplete;
 	return res;
 }
 
 /**
- * Returns a stateful function with onInit, onResult methods such that the given reset callback is called
+ * Returns a stateful function with onInit, onComplete methods such that the given reset callback is called
  * before processing a collection, but only if something was processed previously. Useful for lazily restoring
  * the initial state.
  * @param {Function} f A stateful function (mapper or reducer).
@@ -324,11 +330,11 @@ function isFilteredRest(val) {
 /** Returns a mapper function corresponding to the given filter function f. */
 function filterImpl(f, filtersRest) {
 	var filteredVal = filtersRest ? FILTERED_REST : FILTERED;
-	return function (v, k, o) {
+	return copyStatefulCallbacks(function filteringMapper(v, k, o) {
 		return ((filtersRest && !isFilteredRest(v))
 			|| !isFiltered(v))
 			&& !applyMap(f, v, k, o) ? filteredVal : v;
-	};
+	}, f);
 }
 
 /**
@@ -488,10 +494,10 @@ Wrapper.prototype.pipe = function () {
 };
 
 /** Marks the wrapper as stateful and binds a reset method to it that restores its original state. */
-Wrapper.prototype.stateful = function (onInit, onResult, nowrap) {
+Wrapper.prototype.stateful = function (onInit, onComplete, nowrap) {
 	if (nowrap === undefined)
 		nowrap = !this._wrapped;
-	stateful(this.get(), onInit, onResult, nowrap);
+	stateful(this.get(), onInit, onComplete, nowrap);
 	return this;
 };
 
