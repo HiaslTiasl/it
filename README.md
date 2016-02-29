@@ -16,6 +16,8 @@ Supports iterating over array items and object properties in a functional way, w
 
 This is a general guide about how to use *it*. For a detailled API description see [the code](it.js) itself.
 
+### Basics
+
 You can iterate collections and perform some operations using higher order functions such as `map` and `reduce`.
 
 ```javascript
@@ -27,19 +29,33 @@ it.reduce({ x: 1, y: 2 }, add);             // returns 3
 it.mapReduce({ x: 1, y: 2 }, times2, add);  // returns 6
 ```
 
-For specifying sequences of multiple iterations, you can construct pipes. Piped operations can filter and transform elements, and they can be reused. We refer to filtering operations as 'filters' and to transforming operations as 'mappers'. The `pipe` function accepts multiple mappers. If you want to place a filter in a pipe, wrap it in a call to `it.filter` (which transforms it to a mapper, see [Internals](#internals)).
+The second parameter of `map` and `mapReduce` expects a 'mapper' function that receives an item, the key (or index), and the collection, and maps it to a new item. The second parameter of `reduce` and the third parameter of `mapReduce` expects a 'reducer' function that receives the previous intermediate result, an item, the key, and the collection, and reduces them to a new intermediate result.
 
-The returned pipe is just a new callback function that, when called, executes the given callback arguments in the specified sequence. You can pass the pipe directly to functions such as `map`. If an item does not pass a filter in a pipe, the pipe is cancelled for that item, so any remaining operations in the pipe are not executed for this item.
+### Filters
+
+Wherever a mapper is expected, we can also use 'filters'. A filter also receives item, key, and collection, and returns whether they pass the filter or not. To tell *it* that a function is a filter, use `it.filter`:
+
+```javascript
+const odd = x => x % 2 !== 0;
+
+it.map([1, 2, 3], odd);             // returns [true, false, true]
+it.map([1, 2, 3], it.filter(odd));  // returns [1, 3]
+```
+
+### Pipes
+
+For specifying sequences of multiple iterations, you can construct pipes. Pipes are sequences of mappers and filters, wrapped as a new mapper function. When called, the pipe executes the given callback arguments in the specified order. You can pass the pipe directly to functions such as `map`. If an item does not pass a filter in a pipe, the pipe is cancelled for that item, so any remaining operations in the pipe are not executed.
  
 ```javascript
-const odd         = x => x % 2 !== 0;
 const times2IfOdd = it.pipe(it.filter(odd), times2);
 
 it.map([1, 2, 3], times2IfOdd);                  // returns [2, 6]
 it.mapReduce({ x: 1, y: 2 }, times2IfOdd, add);  // returns 2
 ```
 
-Those who don't like the static API can create a wrapper using `it()` that provides chainable methods for constructing pipes. Note that these methods do not create a new Wrapper instance, but mutate the current wrapper and return it instead. For getting the piped function, use `.get()`.
+### Wrappers
+
+If you don't like the static API, you can create a wrapper using `it()` that provides chainable methods for constructing pipes. Note that these methods do not create a new wrapper instance, but mutate the current wrapper and return it instead. For getting the piped function, use `.get()`.
 
 ```javascript
 it.map([1, 2, 3], it().filter(odd).pipe(times2).get());  // returns [2, 6]
@@ -102,13 +118,9 @@ it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns [6, 4, 2, 0]
 
 In the example above, we construct a pipe that contains a stateful operation, which results in a stateful pipe. Whenever we use stateful operations for processing data in *it*, *it* automatically first executes the provided `onInit` callback before processing the data, and executes the `onComplete` callback when completed. You can use `it.stateful` with filters (as above), filtering mappers, mappers, pipes, and reducers. For Wrappers, use their `.stateful` method.
 
-## Internals
+## Interoperability
 
-### Pipes and Filters
-
-Pipes are just functions that pass input through the callbacks given as arguments. In order to avoid storing information about whether a given callback is a mapper or a filter, we only consider mappers. To place filters in a pipe, we can create a corresponding mapper using `it.filter`. The mapper returns a special object instance if an item did not pass the filter, the item itself otherwise.
-
-Since Pipes are just callback functions with the common signature `(value, key, object)`, technically you can also pass them to build-in Array functions such as `Array.prototype.map` or equivalent functions of third party libraries such as [lodash](https://lodash.com/). However, those do not know of the meaning of the special return values of filtering operations, so they might return wrong results. In case of `map` operations, you can fix this by passing the result to `it.map`:
+Since mappers and pipes are just callback functions with the common signature `(value, key, object)`, technically you can also pass them to build-in Array functions such as `Array.prototype.map` or equivalent functions of third party libraries such as [lodash](https://lodash.com/). However, those do not know of the meaning of the special return values of filtering operations, so they might return wrong results. In case of `map` operations, you can fix this by passing the result to `it.map`:
 
 ```javascript
 let arr = [1,2,3].map(it.pipe(it.filter(odd), times2));  // returns [2, <Object>, 6]
