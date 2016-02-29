@@ -42,6 +42,22 @@ it.map([1, 2, 3], odd);             // returns [true, false, true]
 it.map([1, 2, 3], it.filter(odd));  // returns [1, 3]
 ```
 
+Apart from `it.filter`, there are other, more specialized functions for specifying filters:
+
+<dl>
+  <dt>takeWhile</dt>
+  <dd>Cancels processing of all data as soon as the first item does not pass the filter.</dd>
+  
+  <dt>takeUntilKey</dt>
+  <dd>Lets you specify a key and cancels processing of all data when that encountering that key.</dd>
+  
+  <dt>takeUntilVal</dt>
+  <dd>Lets you specify a item value and cancels processing of all data when that encountering that item.</dd>
+  
+  <dt>uniq</dt>
+  <dd>Deduplicates incoming items, i.e. filters out any items that are already known. You can specify an optional mapper for computing item identities.</dd>
+</dl>
+
 ### Pipes
 
 For specifying sequences of multiple iterations, you can construct pipes. Pipes are sequences of mappers and filters, wrapped as a new mapper function. When called, the pipe executes the given callback arguments in the specified order. You can pass the pipe directly to functions such as `map`. If an item does not pass a filter in a pipe, the pipe is cancelled for that item, so any remaining operations in the pipe are not executed.
@@ -101,7 +117,7 @@ it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns []
 
 In the first call to `it.map`, we process items until we get `POISON_PILL`, after which all following items are discarded. However, in the second call the result is empty. This is because the filter function is stateful, and it keeps the state of the previous call.
 
-Note that there is a stateless function `it.takeUntilVal` equivalent to `noPoisonPillYet` in the example above, which even aborts iterating elements once the given value is encountered. However, there are cases where you need stateful functions. For using stateful mappers or reducers with *it*, you should use `it.stateful` to mark them as such, and provide callbacks for managing the state.
+Note that `it.takeUntilVal` is equivalent to `noPoisonPillYet`, but stateless and more efficient. However, there are cases where you need stateful functions. For using stateful mappers or reducers with *it*, you should use `it.stateful` to mark them as such, and provide callbacks for managing the state.
 
 ```javascript
 alive = undefined;
@@ -117,6 +133,19 @@ it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns [6, 4, 2, 0]
 ```
 
 In the example above, we construct a pipe that contains a stateful operation, which results in a stateful pipe. Whenever we use stateful operations for processing data in *it*, *it* automatically first executes the provided `onInit` callback before processing the data, and executes the `onComplete` callback when completed. You can use `it.stateful` with filters (as above), filtering mappers, mappers, pipes, and reducers. For Wrappers, use their `.stateful` method.
+
+If restoring state is expensive, you can use `it.resettable` and specify a `onInit` function that is called only if some processing was already done before.
+
+```javascript
+let op = it.stateful(function (value, key, obj) {
+  // ... modify state
+}, function () {
+  console.log("restoring...");
+  // ... do lot of work
+});
+it.map([1, 2, 3], op);  // does not log anything.
+it.map([1, 2, 3], op);  // logs "restoring..."
+```
 
 ## Interoperability
 
