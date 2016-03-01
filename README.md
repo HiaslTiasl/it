@@ -4,13 +4,15 @@ Supports iterating over array items and object properties in a functional way, w
 
 ## Why
 
-*It* is inspired by other libraries such as [lodash](https://lodash.com/), [Ramda](http://ramdajs.com/), and the [Java 8 Stream API](https://docs.oracle.com/javase/8/docs/api/java/util/stream/package-summary.html). *It* provides the following features:
+*It* is inspired by other libraries such as [lodash](https://lodash.com/), [Ramda](http://ramdajs.com/), and the [Java 8 Stream API](https://docs.oracle.com/javase/8/docs/api/java/util/stream/package-summary.html). The reason for ceating *it* was to try modelling sequences of operations as functions for avoiding intermediate results. *It* basically provides the following features:
 - Perform multiple operations on data.
 - Build sequences of operations.
 - Reuse operation sequences for multiple data collections.
+- **ALWAYS** use shortcut fusion, **NEVER** produce intermediate results.
 - Manage stateful operations.
-- Keep full control over shortcut fusion and intermediate results.
 - Small and simple.
+
+The main focus of *it* is on memory efficiency and laziness, but in some cases this also results in [good performance](https://jsperf.com/it-vs-underscore-vs-lodash/5).
 
 ## Usage
 
@@ -155,4 +157,4 @@ let arr = [1,2,3].map(it.pipe(it.filter(odd), times2));  // returns [2, <Object>
 arr = it.map(arr);                                       // returns [2, 6]
 ```
 
-In any case, it is best to avoid this kind of issues and use pipes only with *it* functions if possible.
+Similar issues will result from using stateful operations such as `takeFrom`, `skip`, and `uniq`, as well as custom operations using `stateful`. In any case, it is best to avoid this kind of issues and use pipes only with *it* functions if possible.
