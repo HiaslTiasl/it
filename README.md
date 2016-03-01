@@ -48,25 +48,14 @@ it.count([1, 2, 3, 1), it.filter(1));   // returns 2
 
 Apart from `it.filter`, there are other, more specialized functions for specifying filters:
 
-<dl>
-  <dt>takeFrom</dt>
-  <dd>After one item passes the filter, all following items will pass too.</dd>
-
-  <dt>takeWhile</dt>
-  <dd>Cancels processing of all data as soon as the first item does not pass the filter.</dd>
-  
-  <dt>takeUntil</dt>
-  <dd>Returns a filter that lets items pass as long as they do **NOT** pass the given filter. Then, processing is cancelled.</dd>
-  
-  <dt>skip</dt>
-  <dd>Filters out the given number of items, and lets pass all following items.</dd>
-  
-  <dt>limit</dt>
-  <dd>Lets pass up to the given amount of items, and filters out all following items.</dd>
-  
-  <dt>uniq</dt>
-  <dd>Deduplicates incoming items, i.e. filters out any items that are already known. You can specify an optional mapper for computing item identities.</dd>
-</dl>
+| Function       | Description
+|----------------|------------------------------------------------------------------------------------|
+| `takeFrom(f)`  | After one item passes the filter, all following items will pass too.               |
+| `takeWhile(f)` | Cancels processing of all data as soon as the first item does not pass the filter. |
+| `takeUntil(f)` | Lets items pass as long as they do **NOT** pass the given filter. Then, processing is cancelled. |
+| `skip(count)`  | Filters out the given number of items, and lets pass all following items.          |
+| `limit(count)` | Lets pass up to the given amount of items, and filters out all following items.    |
+| `uniq(mapper)` | Deduplicates incoming items, i.e. filters out any items that are already known. You can specify an optional mapper for computing item identities. |
 
 ### Pipes
 
