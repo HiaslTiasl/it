@@ -5,8 +5,44 @@
 var it = (function () {
 "use strict";
 
-var FILTERED      = {};		// Special return value for filtered items
-var FILTERED_REST = {};		// Special return value for filtered items with cancellation of the whole operation
+/** Represents a filtered value. */
+function Filtered() {}
+
+/** Returns the index of the next item to be processed. */
+Filtered.prototype.nextIndex = function (index, length) {
+	return index + 1;
+};
+
+/** Represents a filtered value, with all remaining items filtered as well. */
+function FilteredRest() {}
+
+FilteredRest.prototype = Object.create(Filtered.prototype);
+FilteredRest.prototype.constructor = FilteredRest;
+
+FilteredRest.prototype.nextIndex = function (index, length) {
+	return length;
+};
+
+/** Represents a filtered value, where all items until the given offset are filtered. */
+function FilteredUntil(offset) {
+	this.offset = offset;
+}
+
+FilteredUntil.prototype = Object.create(Filtered.prototype);
+FilteredUntil.prototype.constructor = FilteredUntil;
+
+FilteredUntil.prototype.nextIndex = function (index, length) {
+	return this.offset;
+};
+
+/** Returns a Filtered object that filters all items until the given offset. */
+function filteredUntil(offset) {
+	return FILTERED_UNTIL[offset] || (FILTERED_UNTIL[offset] = new FilteredUntil(offset));
+}
+
+var FILTERED       = new Filtered();	// Special return value for filtered items
+var FILTERED_REST  = new FilteredRest;	// Special return value for filtered items with cancellation of the whole operation
+var FILTERED_UNTIL = {};				// Cache for instances of FilteredUntil
 
 /**
  * @callback Mapper
@@ -61,29 +97,32 @@ function mapReduce(coll, mapper, reducer, res) {
 		len = arr.length,
 		i = 0,
 		resI = 0,
-		skip = r && arguments.length < 4,
-		resVal;
+		resIsFirst = r && arguments.length < 4;
 	if (!hasReducer)
 		res = res ? isArr ? [] : {} : undefined;
 	onInit(m);
 	onInit(r);
-	for (; !isFilteredRest(resVal) && i < len; i++) {
-		var key = isArr ? i : arr[i];
-		var resKey = isArr ? resI : key;
-		resVal = applyMap(m, coll[key], resKey, coll);
-		if (!isFiltered(resVal)) {
-			if (hasReducer && !skip)
-				resVal = applyReduce(r, res, resVal, resKey, coll);
-			if (!isFiltered(resVal)) {
-				if (isArr)
-					resI++;
-				if (skip)
-					skip = false;
-				if (hasReducer)
-					res = resVal;
-				else if (res)
-					res[resKey] = resVal;
-			}
+	while (i < len) {
+		var key = isArr ? i : arr[i],
+			resKey = isArr ? resI : key,
+			resVal = applyMap(m, coll[key], resKey, coll),
+			filtered = isFiltered(resVal);
+		if (!filtered && hasReducer && !resIsFirst) {
+			resVal = applyReduce(r, res, resVal, resKey, coll);
+			filtered = isFiltered(resVal);
+		}
+		if (filtered)
+			i = resVal.nextIndex(i, len);
+		else {
+			i++;
+			if (isArr)
+				resI++;
+			if (resIsFirst)
+				resIsFirst = false;
+			if (hasReducer)
+				res = resVal;
+			else if (res)
+				res[resKey] = resVal;
 		}
 	}
 	onComplete(m, res);
@@ -337,17 +376,7 @@ function resettable(f, reset, nowrap) {
 
 /** Indicates whether val is a placeholder for a filtered out value. */
 function isFiltered(val) {
-	return isFilteredVal(val) || isFilteredRest(val);
-}
-
-/** Indicates whether val is a placeholder for a single filtered out value. */
-function isFilteredVal(val) {
-	return val === FILTERED;
-}
-
-/** Indicates whether val is a placeholder for filtering out all the remaining collection items. */
-function isFilteredRest(val) {
-	return val === FILTERED_REST;
+	return val instanceof Filtered;
 }
 
 /** Returns a mapper function corresponding to the given filter function f. */
@@ -432,15 +461,13 @@ function takeUntil(filter) {
  * @return {Mapper} A mapper that filters out the first count items and lets pass all remaining ones.
  */
 function skip(count) {
-	var cur,
-		take;
+	var skipNext;
 	return stateful(function (v, k, o) {
-		if (!take && ++cur > count)
-			take = true;
-		return take ? v : FILTERED;
+		var changeOffset = skipNext;
+		skipNext = false;
+		return changeOffset ? filteredUntil(count) : v;
 	}, function () {
-		cur = 0;
-		take = false;
+		skipNext = !!count;
 	}, null, true);
 }
 
