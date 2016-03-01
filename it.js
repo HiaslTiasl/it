@@ -146,6 +146,16 @@ function count(coll, mapper) {
 		: Array.isArray(coll) ? coll.length : Object.keys(coll).length;
 }
 
+/** Indicates whether f is a function. */
+function isFn(f) {
+	return typeof f === "function";
+}
+
+/** Returns f if it is a function, null otherwise. */
+function toFn(f) {
+	return isFn(f) ? f : undefined;
+}
+
 /** Adds a and b. */
 function add(a, b) {
 	return a + b;
@@ -158,13 +168,13 @@ function increment(a) {
 
 /** Executes the onInit method of the given function if existing. */
 function onInit(f) {
-	if (f && typeof f.onInit === "function")
+	if (f && isFn(f.onInit))
 		f.onInit();
 }
 
 /** Executes the onComplete method of the given function if existing. */
 function onComplete(f, res) {
-	if (f && typeof f.onComplete === "function")
+	if (f && isFn(f.onComplete))
 		f.onComplete(res);
 }
 
@@ -186,11 +196,10 @@ function identity(arg) {
  * If map is undefined, it defaults to the identity and v is returned.
  * Otherwise, if map is not a function, it is considered a constant function and map itself is returned.
  */
-function applyMap(map, v, k, o) {
-	var type = typeof map;
-	return type === "function" ? map(v, k, o)
-		: type === "undefined" ? v
-		: map;
+function applyMap(mapper, v, k, o) {
+	return mapper === undefined ? v
+		: isFn(mapper) ? mapper(v, k, o)
+		: mapper;
 }
 
 /**
@@ -199,9 +208,8 @@ function applyMap(map, v, k, o) {
  * Otherwise, if reduce is not a function, it is considered a constant function and reduce itself is returned.
  */
 function applyReduce(reduce, res, v, k, o) {
-	var type = typeof reduce;
-	return type === "function" ? reduce(res, v, k, o)
-		: type === "undefined" ? v
+	return reduce === undefined ? v
+		: isFn(reduce) ? reduce(res, v, k, o)
 		: reduce;
 }
 
@@ -221,21 +229,19 @@ function pipe(args) {
 		piped;
 	if (len > 0) {
 		if (len === 1)
-			piped = mappers[0];
+			piped = unwrap(mappers[0]);
 		else {
 			piped = function (v, k, o) {
 				var res = v;
 				for (var i = 0; !isFiltered(res) && i < len; i++)
-					res = applyMap(mappers[i], res, k, o);
+					res = applyMap(unwrap(mappers[i]), res, k, o);
 				return res;
 			};
 			var statefulOps = null,
 				multiple = false;
 			for (var i = 0; i < len; i++) {
 				var op = mappers[i];
-				if (typeof op === "function"
-					&& (typeof op.onInit === "function" || typeof op.onComplete === "function")
-				) {
+				if (isFn(op) && (isFn(op.onInit) || isFn(op.onComplete))) {
 					if (!statefulOps)
 						statefulOps = op;
 					else if (multiple)
@@ -247,11 +253,11 @@ function pipe(args) {
 				}
 			}
 			if (statefulOps) {
-				piped = !multiple ? copyStatefulCallbacks(piped, statefulOps)
+				piped = !multiple ? copyHooks(piped, statefulOps)
 					: stateful(piped, function () {
-						resetters.forEach(onInit);
+						statefulOps.forEach(onInit);
 					}, function (res) {
-						resetters.forEach(function (f) {
+						statefulOps.forEach(function (f) {
 							onComplete(f, res);
 						});
 					});
@@ -262,29 +268,48 @@ function pipe(args) {
 }
 
 /** Copies methods .onInit and .onComplete from src to dst. */
-function copyStatefulCallbacks(dst, src) {
-	return src ? stateful(dst, src.onInit, src.onComplete) : dst;
+function copyHooks(dst, src) {
+	return src ? stateful(dst, src.onInit, src.onComplete, true) : dst;
+}
+
+/**
+ * Creates a new hook composed by two hooks. If one of those two is not a function,
+ * the other one is directly returned.
+ */
+function composeHooks(oldHook, newHook, getsRes) {
+	return (!oldHook && newHook)
+		|| (!newHook && oldHook)
+		|| (oldHook && newHook && (getsRes ? function (res) {
+			oldHook(res);
+			newHook(res);
+		} : function () {
+			oldHook();
+			newHook();
+		}));
 }
 
  /**
   * Marks the given function as stateful and attaches the given callback functions to it.
-  * @param {Function} f A stateful function (mapper or reducer).
+  * @param {Function} fn A stateful function (mapper or reducer).
   * @param {Function} onInit Function that should be called before processing a collection.
   * @param {Function} [onComplete] Function that should be called after processing a collection.
   * @param {boolean} [nowrap] True if the given function should not be wrapped for attaching the callbacks.
   * @return {Function} The given function, possibly wrapped, and with the given callbacks attached.
   */
-function stateful(f, onInit, onComplete, nowrap) {
-	var hasOnInit = typeof onInit === "function",
-		hasOnComplete = typeof onComplete === "function",
-		res = nowrap || !(hasOnInit || hasOnComplete) ? f
+function stateful(fn, onInit, onComplete, nowrap) {
+	var f = unwrap(fn),
+		oldOnInit     = toFn(f.onInit),
+		oldOnComplete = toFn(f.onComplete),
+		newOnInit     = toFn(onInit),
+		newOnComplete = toFn(onComplete),
+		res = nowrap || !(newOnInit || newOnComplete) ? f
 			: function (optRes, v, k, o) {
 				return o ? f(optRes, v, k, o) : f(optRes, v, k);
 			};
-	if (hasOnInit)
-		res.onInit = onInit;
-	if (hasOnComplete)
-		res.onComplete = onComplete;
+	if (newOnInit)
+		res.onInit = composeHooks(oldOnInit, newOnInit, false);
+	if (newOnComplete)
+		res.onComplete = composeHooks(oldOnComplete, newOnComplete, true);
 	return res;
 }
 
@@ -298,7 +323,7 @@ function stateful(f, onInit, onComplete, nowrap) {
  * @return {Function} The given function, possibly wrapped, and with the given callbacks attached.
  */
 function resettable(f, reset, nowrap) {
-	if (typeof reset === "function") {
+	if (isFn(reset)) {
 		var toBeReset = false;
 		f = stateful(f, function () {
 			if (toBeReset)
@@ -326,76 +351,125 @@ function isFilteredRest(val) {
 }
 
 /** Returns a mapper function corresponding to the given filter function f. */
-function filterImpl(f, filtersRest) {
-	var filteredVal = filtersRest ? FILTERED_REST : FILTERED;
-	return copyStatefulCallbacks(function filteringMapper(v, k, o) {
-		return ((filtersRest && !isFilteredRest(v))
-			|| !isFiltered(v))
-			&& !applyMap(f, v, k, o) ? filteredVal : v;
+function createFilterImpl(filter, onFiltered) {
+	var f = unwrap(filter),
+		asVal = !isFn(f);
+	return copyHooks(function (v, k, o) {
+		return filterImpl(f, v, k, o, asVal) ? v : onFiltered;
 	}, f);
 }
 
+/** Returns whether the tuple (v, k, o) passes filter f, where f is possibly given as the desired value for v. */
+function filterImpl(f, v, k, o, asVal) {
+	return asVal ? v === f : applyMap(f, v, k, o);
+}
+
 /**
- * Returns a mapper function corresponding to the given filter function f. If, for a given input, f returns false, 
+ * Returns a mapper function corresponding to the given filter function. If, for a given input, filter returns false, 
  * the resulting mapper returns a special value indicating that the filter condition is not met. Otherwise, it
  * returns the input value.
- * @param {Filter} f The filter function.
+ * @param {Filter} filter The filter function.
  * @return {Mapper} A mapper corresponding to the filter function, which returns the input value if the filter
  *         condition is met, and a special value otherwise.
  */
-function filter(f) {
-	return filterImpl(f, false);
+function filter(filter) {
+	return createFilterImpl(filter, FILTERED);
+}
+
+/**
+ * Returns a mapper function that filters items until one item passes the given filter function, and lets pass all
+ * following items.
+ * @param {Filter|*} filter A filter. If not specified as a function, it is considered to be the value of the (first) item
+ *        that passes the filter.
+ * @return {Mapper} A mapper that filters items until one item passes the given filter function.
+ */
+function takeFrom(filter) {
+	var f = unwrap(filter),
+		asVal = !isFn(f),
+		take;
+	function takeFromMapper(v, k, o) {
+		if (!take && filterImpl(f, v, k, o, asVal))
+			take = true;
+		return take ? v : FILTERED;
+	}
+	// Also keep hooks of f
+	return stateful(copyHooks(takeFromMapper, f), function () {
+		take = false;
+	});
 }
 
 /**
  * Returns a mapper function corresponding to the given filter function f. If, for a given input, f returns false,
  * the resulting mapper returns a special value indicating that the filter condition is not met and any remaining
  * collection items, including this one, do not pass the filter. Otherwise, it returns the input value.
- * @param {Filter} f The filter function.
+ * @param {Filter} filter The filter function.
  * @return {Mapper} A mapper corresponding to the filter function, which returns the input value if the filter
  *         condition is met, and a special value otherwise.
  */
-function takeWhile(f) {
-	return filterImpl(f, true);
+function takeWhile(filter) {
+	return createFilterImpl(filter, FILTERED_REST);
 }
 
 /**
- * Returns a mapper function that filters out any remaining items once it encounters the given key. Equivalent to
- * it.takeWhile((v, k, o) => k !== key).
- * @return {Mapper} A mapper that filters out any remaining items once it encounters the given key.
+ * Returns a mapper function that filters out any remaining items once it encounters an item that passes the given
+ * filter. Basically equivalent to it.takeFrom((v, k, o) => !f(v, k, o)).
+ * @param {Filter|*} filter A filter. If not specified as a function, it is considered to be the value of the (first) item
+ *        that does not pass the filter.
+ * @return {Mapper} A mapper that filters out any remaining items once it encounters an item that passes the given
+ *         filter.
  */
-function takeUntilKey(key) {
-	return function (v, k, o) {
-		return k === key ? FILTERED_REST : v;
-	};
+function takeUntil(filter) {
+	var f = unwrap(filter),
+		asVal = !isFn(f);
+	return copyHooks(function (v, k, o) {
+		return filterImpl(f, v, k, o, asVal) ? FILTERED_REST : v;
+	}, f);
 }
 
 /**
- * Returns a mapper function that filters out any remaining items once it encounters the given value. Equivalent to
- * it.takeWhile((v, k, o) => v !== val).
- * @return {Mapper} A mapper that filters out any remaining items once it encounters the given key.
+ * Returns a mapper function that filters out the first count items and lets pass all remaining ones.
+ * @param {number} count The number of items to skip.
+ * @return {Mapper} A mapper that filters out the first count items and lets pass all remaining ones.
  */
-function takeUntilVal(val) {
-	return function (v, k, o) {
-		return v === val ? FILTERED_REST : v;
-	};
+function skip(count) {
+	var cur,
+		take;
+	return stateful(function (v, k, o) {
+		if (!take && ++cur > count)
+			take = true;
+		return take ? v : FILTERED;
+	}, function () {
+		cur = 0;
+		take = false;
+	}, null, true);
 }
 
 /**
- * Returns a mapper function that filters out any that it already received previously. Note that this mapper is stateful!
- * In particular, If the resulting mapper is applied twice to the same collection, the second time it will simply filter
- * out all items, since it still knows them from the previous time. In order to deal with this issue, the resulting function
- * has a method reset that, when called, discards the internal cache to restore the initial state.
- * If a mapper is given, it will be used to compute the identity, but only the original values are returned.
+ * Returns a mapper that filters out any remaining items once it received size items.
+ * @param {number} size The maximum number of items to keep.
+ * @return {Mapper} A mapper that filters out any remaining items once it received size items.
+ */
+function limit(size) {
+	var cur;
+	return stateful(function (v) {
+		return ++cur > size ? FILTERED_REST : v
+	}, function () {
+		cur = 0;
+	}, null, true);
+}
+
+/**
+ * Returns a mapper function that filters out any that it already received previously.
  * @param {Mapper} [mapper] A mapper to compute the identity of input values.
  * @return {Mapper} A mapper that filters out duplicated input values.
  */
 function uniq(mapper) {
-	var type = typeof mapper,
+	var f = unwrap(mapper),
+		type = typeof f,
 		constant = type !== "function" && type !== "undefined",
 		known = constant ? false : {};
-	return stateful(function filterKnown(v, k, o) {
-		var val = applyMap(mapper, v, k, o);
+	function deduplicatingMapper(v, k, o) {
+		var val = applyMap(f, v, k, o);
 		if (constant ? known : known[val])
 			v = constant ? FILTERED_REST : FILTERED;
 		else if (constant)
@@ -403,7 +477,9 @@ function uniq(mapper) {
 		else
 			known[val] = true;
 		return v;
-	}, function () {
+	}
+	// Also keep hooks of f
+	return stateful(copyHooks(deduplicatingMapper, f), function () {
 		known = constant ? false : {};
 	}, function () {
 		known = null;
@@ -492,7 +568,7 @@ Wrapper.prototype.pipe = function (args) {
 	return this;
 };
 
-/** Marks the wrapper as stateful and binds a reset method to it that restores its original state. */
+/** Marks the wrapper as stateful and binds the given onInit and onComplete method to it for managing state. */
 Wrapper.prototype.stateful = function (onInit, onComplete, nowrap) {
 	if (nowrap === undefined)
 		nowrap = !this._wrapped;
@@ -500,10 +576,20 @@ Wrapper.prototype.stateful = function (onInit, onComplete, nowrap) {
 	return this;
 };
 
+/** Marks the wrapper as stateful and binds onInit and onComplete methods to it for lazily restoring the original state. */
+Wrapper.prototype.resettable = function (reset, nowrap) {
+	if (nowrap === undefined)
+		nowrap = !this._wrapped;
+	resettable(this.get(), reset, nowrap);
+	return this;
+};
+
 Wrapper.prototype.filter       = pipeMethod(filter);
+Wrapper.prototype.takeFrom     = pipeMethod(takeFrom);
 Wrapper.prototype.takeWhile    = pipeMethod(takeWhile);
-Wrapper.prototype.takeUntilKey = pipeMethod(takeUntilKey);
-Wrapper.prototype.takeUntilVal = pipeMethod(takeUntilVal);
+Wrapper.prototype.takeUntil    = pipeMethod(takeUntil);
+Wrapper.prototype.skip         = pipeMethod(skip);
+Wrapper.prototype.limit        = pipeMethod(limit);
 Wrapper.prototype.uniq         = pipeMethod(uniq);
 
 Wrapper.prototype.forEach   = terminalMethod(forEach);
@@ -513,6 +599,7 @@ Wrapper.prototype.mapReduce = terminalMethod(mapReduce);
 Wrapper.prototype.sum       = terminalMethod(sum);
 Wrapper.prototype.count     = terminalMethod(count);
 
+/** Lazily creates and returns the wrapped mapper. */
 Wrapper.prototype.get = function () {
 	if (!this._wrapped)
 		this._wrapped = pipe(this._pipe);
@@ -530,10 +617,12 @@ it.pipe         = pipe;
 it.stateful     = stateful;
 it.resettable   = resettable;
 it.filter       = filter;
-it.uniq         = uniq;
+it.takeFrom     = takeFrom;
 it.takeWhile    = takeWhile;
-it.takeUntilKey = takeUntilKey;
-it.takeUntilVal = takeUntilVal;
+it.takeUntil    = takeUntil;
+it.skip         = skip;
+it.limit        = limit;
+it.uniq         = uniq;
 it.noop         = noop;
 it.identity     = identity;
 
