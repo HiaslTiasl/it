@@ -100,8 +100,8 @@ function mapReduce(coll, mapper, reducer, res) {
 		resIsFirst = r && arguments.length < 4;
 	if (!hasReducer)
 		res = res ? isArr ? [] : {} : undefined;
-	onInit(m);
-	onInit(r);
+	setupState(m);
+	setupState(r);
 	while (i < len) {
 		var key = isArr ? i : arr[i],
 			resKey = isArr ? resI : key,
@@ -125,8 +125,8 @@ function mapReduce(coll, mapper, reducer, res) {
 				res[resKey] = resVal;
 		}
 	}
-	onComplete(m, res);
-	onComplete(r, res);
+	teardownState(m);
+	teardownState(r);
 	return res;
 }
 
@@ -205,16 +205,16 @@ function increment(a) {
 	return a + 1;
 }
 
-/** Executes the onInit method of the given function if existing. */
-function onInit(f) {
-	if (f && isFn(f.onInit))
-		f.onInit();
+/** Executes the setup method of the given function if existing. */
+function setupState(f) {
+	if (f && isFn(f.setup))
+		f.setup();
 }
 
-/** Executes the onComplete method of the given function if existing. */
-function onComplete(f, res) {
-	if (f && isFn(f.onComplete))
-		f.onComplete(res);
+/** Executes the teardown method of the given function if existing. */
+function teardownState(f) {
+	if (f && isFn(f.teardown))
+		f.teardown();
 }
 
 /** Executes the given function. */
@@ -280,7 +280,7 @@ function pipe(args) {
 				multiple = false;
 			for (var i = 0; i < len; i++) {
 				var op = mappers[i];
-				if (isFn(op) && (isFn(op.onInit) || isFn(op.onComplete))) {
+				if (isFn(op) && (isFn(op.setup) || isFn(op.teardown))) {
 					if (!statefulOps)
 						statefulOps = op;
 					else if (multiple)
@@ -294,11 +294,9 @@ function pipe(args) {
 			if (statefulOps) {
 				piped = !multiple ? copyHooks(piped, statefulOps)
 					: stateful(piped, function () {
-						statefulOps.forEach(onInit);
-					}, function (res) {
-						statefulOps.forEach(function (f) {
-							onComplete(f, res);
-						});
+						statefulOps.forEach(setupState);
+					}, function () {
+						statefulOps.forEach(teardownState);
 					});
 			}
 		}
@@ -306,54 +304,51 @@ function pipe(args) {
 	return piped;
 }
 
-/** Copies methods .onInit and .onComplete from src to dst. */
+/** Copies methods .setup and .teardown from src to dst. */
 function copyHooks(dst, src) {
-	return src ? stateful(dst, src.onInit, src.onComplete, true) : dst;
+	return src ? stateful(dst, src.setup, src.teardown, true) : dst;
 }
 
 /**
  * Creates a new hook composed by two hooks. If one of those two is not a function,
  * the other one is directly returned.
  */
-function composeHooks(oldHook, newHook, getsRes) {
+function composeHooks(oldHook, newHook) {
 	return (!oldHook && newHook)
 		|| (!newHook && oldHook)
-		|| (oldHook && newHook && (getsRes ? function (res) {
-			oldHook(res);
-			newHook(res);
-		} : function () {
+		|| (oldHook && newHook && function () {
 			oldHook();
 			newHook();
-		}));
+		});
 }
 
  /**
   * Marks the given function as stateful and attaches the given callback functions to it.
   * @param {Function} fn A stateful function (mapper or reducer).
-  * @param {Function} onInit Function that should be called before processing a collection.
-  * @param {Function} [onComplete] Function that should be called after processing a collection.
+  * @param {Function} setup Function that should be called before processing a collection.
+  * @param {Function} [teardown] Function that should be called after processing a collection.
   * @param {boolean} [nowrap] True if the given function should not be wrapped for attaching the callbacks.
   * @return {Function} The given function, possibly wrapped, and with the given callbacks attached.
   */
-function stateful(fn, onInit, onComplete, nowrap) {
+function stateful(fn, setup, teardown, nowrap) {
 	var f = unwrap(fn),
-		oldOnInit     = toFn(f.onInit),
-		oldOnComplete = toFn(f.onComplete),
-		newOnInit     = toFn(onInit),
-		newOnComplete = toFn(onComplete),
-		res = nowrap || !(newOnInit || newOnComplete) ? f
+		oldSetup    = toFn(f.setup),
+		oldTeardown = toFn(f.teardown),
+		newSetup    = toFn(setup),
+		newTeardown = toFn(teardown),
+		res = nowrap || !(newSetup || newTeardown) ? f
 			: function (optRes, v, k, o) {
 				return o ? f(optRes, v, k, o) : f(optRes, v, k);
 			};
-	if (newOnInit)
-		res.onInit = composeHooks(oldOnInit, newOnInit, false);
-	if (newOnComplete)
-		res.onComplete = composeHooks(oldOnComplete, newOnComplete, true);
+	if (newSetup)
+		res.setup = composeHooks(oldSetup, newSetup);
+	if (newTeardown)
+		res.teardown = composeHooks(oldTeardown, newTeardown);
 	return res;
 }
 
 /**
- * Returns a stateful function with onInit, onComplete methods such that the given reset callback is called
+ * Returns a stateful function with setup, teardown methods such that the given reset callback is called
  * before processing a collection, but only if something was processed previously. Useful for lazily restoring
  * the initial state.
  * @param {Function} f A stateful function (mapper or reducer).
@@ -595,15 +590,15 @@ Wrapper.prototype.pipe = function (args) {
 	return this;
 };
 
-/** Marks the wrapper as stateful and binds the given onInit and onComplete method to it for managing state. */
-Wrapper.prototype.stateful = function (onInit, onComplete, nowrap) {
+/** Marks the wrapper as stateful and binds the given setup and teardown method to it for managing state. */
+Wrapper.prototype.stateful = function (setup, teardown, nowrap) {
 	if (nowrap === undefined)
 		nowrap = !this._wrapped;
-	stateful(this.get(), onInit, onComplete, nowrap);
+	stateful(this.get(), setup, teardown, nowrap);
 	return this;
 };
 
-/** Marks the wrapper as stateful and binds onInit and onComplete methods to it for lazily restoring the original state. */
+/** Marks the wrapper as stateful and binds setup and teardown methods to it for lazily restoring the original state. */
 Wrapper.prototype.resettable = function (reset, nowrap) {
 	if (nowrap === undefined)
 		nowrap = !this._wrapped;
