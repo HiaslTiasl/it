@@ -120,18 +120,18 @@ Note that we could use `it.takeWhile` or `it.takeUntil` to achieve the same effe
 
 ```javascript
 alive = undefined;
-const onInit     = () => alive = true;
-const onComplete = () => alive = undefined;
+const setup    = () => alive = true;
+const teardown = () => alive = undefined;
 const statefulOp = it.stateful(noPoisonPillYet, onInit, onResult);
 
-pipe = it.pipe(it.filter(statefulOp), times2); // Equivalent to it.stateful(pipe, onInit, onResult),
+pipe = it.pipe(it.filter(statefulOp), times2); // Equivalent to it.stateful(pipe, setup, teardown),
                                                // with pipe as defined in previous example
 
 it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns [6, 4, 2, 0]
 it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns [6, 4, 2, 0]
 ```
 
-In the example above, we construct a pipe that contains a stateful operation, which results in a stateful pipe. Whenever we use stateful operations for processing data in *it*, *it* automatically first executes the provided `onInit` callback before processing the data, and executes the `onComplete` callback when completed. You can use `it.stateful` with filters (as above), filtering mappers, mappers, pipes, and reducers. For Wrappers, use their `.stateful` method.
+In the example above, we construct a pipe that contains a stateful operation, which results in a stateful pipe. Whenever we use stateful operations for processing data in *it*, *it* automatically first executes the provided `setup` callback before processing the data, and executes the `teardown` callback when completed. You can use `it.stateful` with filters (as above), filtering mappers, mappers, pipes, and reducers. For Wrappers, use their `.stateful` method. As in the example above, you should attach the corresponding callbacks to the operation of the lowest level possible, since this allows reusing that operation later for constructing additional pipes without worrying about statefulness anymore.
 
 If restoring state is expensive, you can use `it.resettable` and specify a `onInit` function that is called only if some processing was already done before.
 
