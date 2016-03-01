@@ -27,32 +27,42 @@ const add    = (a, b) => a + b;
 it.map([1, 2, 3], times2);                  // returns [2, 4, 6]
 it.reduce({ x: 1, y: 2 }, add);             // returns 3
 it.mapReduce({ x: 1, y: 2 }, times2, add);  // returns 6
+it.sum([1, 2, 3], times2);                  // returns 12
+it.count([1, 2, 3));                        // returns 3
 ```
 
 The second parameter of `map` and `mapReduce` expects a 'mapper' function that receives an item, the key (or index), and the collection, and maps it to a new item. The second parameter of `reduce` and the third parameter of `mapReduce` expects a 'reducer' function that receives the previous intermediate result, an item, the key, and the collection, and reduces them to a new intermediate result.
 
 ### Filters
 
-Wherever a mapper is expected, we can also use 'filters'. A filter also receives item, key, and collection, and returns whether they pass the filter or not. To tell *it* that a function is a filter, use `it.filter`:
+Wherever a mapper is expected, we can also use 'filters'. A filter also receives item, key, and collection, and returns whether they pass the filter or not. To tell *it* that a function is a filter, use `it.filter`. If you pass a value instead of a function, it is interpreted as strict equality to that value:
 
 ```javascript
 const odd = x => x % 2 !== 0;
 
-it.map([1, 2, 3], odd);             // returns [true, false, true]
-it.map([1, 2, 3], it.filter(odd));  // returns [1, 3]
+it.map([1, 2, 3], odd);                 // returns [true, false, true]
+it.map([1, 2, 3], it.filter(odd));      // returns [1, 3]
+it.map([1, 2, 3, 1]), it.filter(1));    // returns [1, 1]
+it.count([1, 2, 3, 1), it.filter(1));   // returns 2
 ```
 
 Apart from `it.filter`, there are other, more specialized functions for specifying filters:
 
 <dl>
+  <dt>takeFrom</dt>
+  <dd>After one item passes the filter, all following items will pass too.</dd>
+
   <dt>takeWhile</dt>
   <dd>Cancels processing of all data as soon as the first item does not pass the filter.</dd>
   
-  <dt>takeUntilKey</dt>
-  <dd>Lets you specify a key and cancels processing of all data when that encountering that key.</dd>
+  <dt>takeUntil</dt>
+  <dd>Returns a filter that lets items pass as long as they do **NOT** pass the given filter. Then, processing is cancelled.</dd>
   
-  <dt>takeUntilVal</dt>
-  <dd>Lets you specify a item value and cancels processing of all data when that encountering that item.</dd>
+  <dt>skip</dt>
+  <dd>Filters out the given number of items, and lets pass all following items.</dd>
+  
+  <dt>limit</dt>
+  <dd>Lets pass up to the given amount of items, and filters out all following items.</dd>
   
   <dt>uniq</dt>
   <dd>Deduplicates incoming items, i.e. filters out any items that are already known. You can specify an optional mapper for computing item identities.</dd>
@@ -117,7 +127,7 @@ it.map([3, 2, 1, 0, -1, -2, -3], pipe);  // returns []
 
 In the first call to `it.map`, we process items until we get `POISON_PILL`, after which all following items are discarded. However, in the second call the result is empty. This is because the filter function is stateful, and it keeps the state of the previous call.
 
-Note that we could use `it.takeWhile` or `it.takeUntilVal` to achieve the same effect, but in a stateless and more efficient way. However, there are cases where you need stateful functions. For using stateful mappers or reducers with *it*, you should use `it.stateful` to mark them as such, and provide callbacks for managing the state.
+Note that we could use `it.takeWhile` or `it.takeUntil` to achieve the same effect, but in a stateless and more efficient way. However, there are cases where you need stateful functions. For using stateful mappers or reducers with *it*, you should use `it.stateful` to mark them as such, and provide callbacks for managing the state.
 
 ```javascript
 alive = undefined;
