@@ -138,9 +138,9 @@ In the example above, we construct a pipe that contains a stateful operation, wh
 If restoring state is expensive, you can use `it.resettable` and specify a `onInit` function that is called only if some processing was already done before.
 
 ```javascript
-let op = it.stateful(function (value, key, obj) {
+let op = it.resettable((value, key, obj) => {
   // ... modify state
-}, function () {
+}, () => {
   console.log("restoring...");
   // ... do lot of work
 });
